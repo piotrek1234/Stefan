@@ -10,24 +10,26 @@
 #define BAUDRATE 115200
 #define BAUD_PRESCALE (((F_CPU/(BAUDRATE*16UL)))-1)
 
+#include <avr/io.h>
+#include <util/delay.h>
+#include <stdlib.h>
+#include <avr/interrupt.h>
+
 #define SILNIK_L OCR1B
 #define SILNIK_P OCR1A
+
 #define PWM_MAX 150
 #define PWM_PROSTO 40
+
 #define TRYB_NIC 0
 #define TRYB_ODLICZANIE 1
 #define TRYB_JAZDA 2
 #define TRYB_STOP 3
 #define TRYB_KALIBRACJA 4
 
-#include <avr/io.h>
-#include <util/delay.h>
-#include <stdlib.h>
-#include <avr/interrupt.h>
-
 volatile u08 wartosci[12], stany[12], strona = 'L', tryb = TRYB_NIC, granica;
-volatile signed int wagi[12] = {-155, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 155};
 volatile signed int starySygnal = 0;
+volatile signed int wagi[12] = {-155, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 155};
 
 void ustaw_porty()
 {
@@ -99,6 +101,10 @@ void ustaw_timer()
 	//odlicza 10ms i wywo³uje przerwanie
 	//dla 5ms trzeba ustawiæ OCR0 = 36
 }
+void wylacz_timer()
+{
+	TCCR0 &= ~((1<<CS02)|(1<<CS01)|(1<<CS00));
+}
 
 void wyslij_usart(u08 znak)
 {
@@ -128,7 +134,8 @@ int main(void)
 	ustaw_usart();
 	ustaw_pwm();
 	ustaw_przerwania();
-	ustaw_timer();
+	
+	sei();
 	
 	_delay_ms(100);
 	while(tryb == TRYB_NIC)	//obs³uga przycisków
@@ -138,75 +145,84 @@ int main(void)
 	}
 	while(PINC & (1<<PC4));	//czekaj na lewy przycisk
 	
-	if(tryb == TRYB_KALIBRACJA)
+	while(1)
 	{
-		PORTB &= ~(1<<PB2);	//zapalona lewa dioda
-		u08 czujniki = 'L';
-		while((PINC & (1<<PC5)) && !(PINB & (1<<PB5)))	//czekaj na œrodkowy przycisk lub sygna³ z pilota
+		if(tryb == TRYB_KALIBRACJA)
 		{
-			if(czujniki == 'P')
+			PORTB &= ~(1<<PB2);	//zapalona lewa dioda
+			u08 czujniki = 'L';
+			while((PINC & (1<<PC5)) && !(PINB & (1<<PB5)))	//czekaj na œrodkowy przycisk lub sygna³ z pilota
 			{
-				zmien_czujniki('L');
-				czujniki = 'L';
-			}
-			else
-			{
+				if(czujniki == 'P')
+				{
+					zmien_czujniki('L');
+					czujniki = 'L';
+				}
+				else
+				{
+					zmien_czujniki('P');
+					czujniki = 'P';
+				}
+				_delay_ms(10);
+				for(u08 i = 0; i<6; i++)
+				{
+					u08 wartosc;
+					wartosc = pomiar(i);
+					if(wartosc > max) max = wartosc;
+					else if(wartosc < min) min = wartosc;
+				}
 				zmien_czujniki('P');
-				czujniki = 'P';
+				_delay_ms(10);
+				for(u08 i = 0; i<6; i++)
+				{
+					u08 wartosc;
+					wartosc = pomiar(i);
+					if(wartosc > max) max = wartosc;
+					else if(wartosc < min) min = wartosc;
+				}
 			}
-			_delay_ms(10);
-			for(u08 i = 0; i<6; i++)
-			{
-				u08 wartosc;
-				wartosc = pomiar(i);
-				if(wartosc > max) max = wartosc;
-				else if(wartosc < min) min = wartosc;
-			}
-			zmien_czujniki('P');
-			_delay_ms(10);
-			for(u08 i = 0; i<6; i++)
-			{
-				u08 wartosc;
-				wartosc = pomiar(i);
-				if(wartosc > max) max = wartosc;
-				else if(wartosc < min) min = wartosc;
-			}
+			granica = (min+max)/2;
+			tryb = TRYB_ODLICZANIE;
 		}
-		granica = (min+max)/2;
-		tryb = TRYB_ODLICZANIE;
-	}
-	if(tryb == TRYB_ODLICZANIE)
-	{
-		PORTB |= (1<<PB2);	//zgaœ diodê od kalibracji
-		for(u08 i = 0; i<4; i++)	//mruganie diod¹ œrodkow¹
+		if(tryb == TRYB_ODLICZANIE)
 		{
-			PORTB ^= (1<<PB3);
-			_delay_ms(500);
-		}
-		SILNIK_L = 0;
-		SILNIK_P = 0;
+			PORTB |= (1<<PB2);	//zgaœ diodê od kalibracji
+			for(u08 i = 0; i<4; i++)	//mruganie diod¹ œrodkow¹
+			{
+				PORTB ^= (1<<PB3);
+				_delay_ms(500);
+			}
+			SILNIK_L = 0;
+			SILNIK_P = 0;
 		
-		PORTC &= ~((1<<PC1)|(1<<PC2));
-		PORTC |= ((1<<PC0)|(1<<PC3));	//do przodu
+			PORTC &= ~((1<<PC1)|(1<<PC2));
+			PORTC |= ((1<<PC0)|(1<<PC3));	//do przodu
 		
-		tryb = TRYB_JAZDA;
-	}	
+			ustaw_timer();
+			tryb = TRYB_JAZDA;
+		}	
 	
-	if(tryb == TRYB_STOP)
-	{
-		for(;;)	//mrugaj wszystkimi diodami
+		if(tryb == TRYB_STOP)
 		{
-			PORTB ^= ((1<<PB2)|(1<<PB3)|(1<<PB4));
-			_delay_ms(500);
+			wylacz_timer();
+			SILNIK_L = 0;
+			SILNIK_P = 0;
+			PORTB |= (1<<PB4);
+			
+			for(;;)	//mrugaj wszystkimi diodami
+			{
+				PORTB ^= ((1<<PB2)|(1<<PB3)|(1<<PB4));
+				_delay_ms(500);
+			}
 		}
-	}
+	}	
 	
 	return 0;
 }
 
 ISR(INT0_vect)	//obs³uga sygna³u STOP
 {
-	tryb = TRYB_STOP;
+	if(tryb == TRYB_JAZDA) tryb = TRYB_STOP;
 }
 
 ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
@@ -230,7 +246,7 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 		zmien_czujniki('L');
 	}
 	
-	if(strona == 'L' && tryb == TRYB_JAZDA)	//wczytane obie strony; dzia³ania na sygnale
+	if((strona == 'L') && (tryb == TRYB_JAZDA))	//wczytane obie strony; dzia³ania na sygnale
 	{
 		for(u08 i = 0; i<12; i++)	//progowanie
 		{
@@ -251,7 +267,9 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 		if((sygnal < 6) && (sygnal > -6))
 		{
 			sygnal = starySygnal;
+			PORTB &= ~(1<<PB4);	
 		}
+		else PORTB |= (1<<PB4);	//prawa dioda œwieci przy sygnale bliskim 0
 		
 		starySygnal = sygnal;
 		
@@ -262,7 +280,7 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 			else if(naSilnikP > PWM_MAX) naSilnikP = PWM_MAX;
 		if(naSilnikL < 0) naSilnikL = 0;
 			else if(naSilnikL > PWM_MAX) naSilnikL = PWM_MAX;
-			
+		
 		SILNIK_P = naSilnikP;
 		SILNIK_L = naSilnikL;
 	}
