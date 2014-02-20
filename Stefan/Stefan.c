@@ -5,20 +5,29 @@
  *  Author: Piotrek
  */ 
 #define F_CPU 7372800UL
-//#define F_CPU 1000000UL
 #define u08 unsigned char
 #define s08 signed char
 #define BAUDRATE 115200
 #define BAUD_PRESCALE (((F_CPU/(BAUDRATE*16UL)))-1)
+
+#define SILNIK_L OCR1B
+#define SILNIK_P OCR1A
+#define PWM_MAX 150
+#define PWM_PROSTO 40
+#define TRYB_NIC 0
+#define TRYB_ODLICZANIE 1
+#define TRYB_JAZDA 2
+#define TRYB_STOP 3
+#define TRYB_KALIBRACJA 4
 
 #include <avr/io.h>
 #include <util/delay.h>
 #include <stdlib.h>
 #include <avr/interrupt.h>
 
-volatile u08 wartosci[12], strona = 'L';
-volatile u08 stany[12];
+volatile u08 wartosci[12], stany[12], strona = 'L', tryb = TRYB_NIC, granica;
 volatile signed int wagi[12] = {-155, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 155};
+volatile signed int starySygnal = 0;
 
 void ustaw_porty()
 {
@@ -40,6 +49,7 @@ void ustaw_adc()
 	ADMUX |= ((1<<REFS0)|(1<<ADLAR)|7);	//VCC jako napiêcie odniesienia, wyrównanie wyniku do lewej, kana³ 7 (bateria)
 	ADCSRA |= ((1<<ADEN)|(1<<ADPS1));	//w³¹czenie ADC, dzielnik czêstotliwoœci 4
 }
+
 void ustaw_usart()
 {
 	UCSRB |= (1<<RXEN)|(1<<TXEN);
@@ -47,6 +57,7 @@ void ustaw_usart()
 	UBRRL = BAUD_PRESCALE;
 	UBRRH = (BAUD_PRESCALE>>8);
 }
+
 void ustaw_przerwania()
 {
 	MCUCR |= ((1<<ISC00)|(1<<ISC01));	//zbocze narastaj¹ce na PD2
@@ -65,8 +76,8 @@ void ustaw_pwm()
 {
 	TCCR1A |= ((1<<WGM10)|(1<<COM1A1)|(1<<COM1B1));	//non-inverting, 8-bit fast PWM
 	TCCR1B |= ((1<<WGM12)|(1<<CS10));	//28 kHz
-	OCR1A = 0;
-	OCR1B = 0;
+	SILNIK_L = 0;
+	SILNIK_P = 0;
 	
 	/* czêstotliwoœæ PWM:
 	CS12 CS11 CS10 czêstotliwoœæ
@@ -106,8 +117,7 @@ u08 pomiar(u08 kanal)
 
 int main(void)
 {
-	u08 czyADC = 0, czyPWM = 0;
-	volatile u08 min = 255, max = 0, granica;
+	volatile u08 min = 255, max = 0;
 	
 	//wy³¹czenie JTAG
 	MCUCSR |= (1<<JTD);
@@ -118,62 +128,21 @@ int main(void)
 	ustaw_usart();
 	ustaw_pwm();
 	ustaw_przerwania();
+	ustaw_timer();
 	
 	_delay_ms(100);
-	while(!(czyADC || czyPWM))
+	while(tryb == TRYB_NIC)	//obs³uga przycisków
 	{
-		if(!(PINC & (1<<PC5))) czyADC = 1;
-		else if(!(PINC & (1<<PC6))) czyPWM = 1;
+		if(!(PINC & (1<<PC5))) tryb = TRYB_KALIBRACJA;
+		else if(!(PINC & (1<<PC6))) tryb = TRYB_ODLICZANIE;
 	}
 	while(PINC & (1<<PC4));	//czekaj na lewy przycisk
 	
-	if(czyADC)
+	if(tryb == TRYB_KALIBRACJA)
 	{
-		/*u08 bateria = pomiar(7);
-		char bufor[4];
-		itoa(bateria, bufor, 10);
-		int j = 0;
-		while(bufor[j] != 0)
-		{
-			wyslij_usart(bufor[j]);
-			j++;
-		}
-		
-		//czekanie na sygna³ start, potem wchodzimy do pêtli
-	    while(1)
-	    {
-			zmien_czujniki('L');
-			_delay_ms(10);
-			for(u08 i = 0; i<6; i++)
-			{
-				wartosci[5-i] = pomiar(i);
-			}
-			zmien_czujniki('P');
-			_delay_ms(10);
-			for(u08 i = 0; i<6; i++)
-			{
-				wartosci[i+6] = pomiar(i);
-			}
-			
-			wyslij_usart('[');
-			for(u08 i = 0; i<12; i++)
-			{
-				//char bufor[4];
-				itoa(wartosci[i], bufor, 10);
-				int j = 0;
-				while(bufor[j] != 0)
-				{
-					wyslij_usart(bufor[j]);
-					j++;
-				}
-				if(i<11) wyslij_usart(';');
-			}			
-			wyslij_usart(']');
-			_delay_ms(100);
-			
-	    }*/
+		PORTB &= ~(1<<PB2);	//zapalona lewa dioda
 		u08 czujniki = 'L';
-		while((PINC & (1<<PC5)) && !(PINB & (1<<PB5)))
+		while((PINC & (1<<PC5)) && !(PINB & (1<<PB5)))	//czekaj na œrodkowy przycisk lub sygna³ z pilota
 		{
 			if(czujniki == 'P')
 			{
@@ -202,94 +171,30 @@ int main(void)
 				if(wartosc > max) max = wartosc;
 				else if(wartosc < min) min = wartosc;
 			}
-			
 		}
 		granica = (min+max)/2;
-		czyPWM = 1;
-		
+		tryb = TRYB_ODLICZANIE;
 	}
-	if(czyPWM)
+	if(tryb == TRYB_ODLICZANIE)
 	{
-		for(u08 i = 0; i<4; i++)
+		PORTB |= (1<<PB2);	//zgaœ diodê od kalibracji
+		for(u08 i = 0; i<4; i++)	//mruganie diod¹ œrodkow¹
 		{
 			PORTB ^= (1<<PB3);
 			_delay_ms(500);
 		}
-		//u08 licznik = 0;
-		//u08 granica = 160;
-		OCR1A = 0;
-		OCR1B = 0;
-		//u08 kier = 'P';
+		SILNIK_L = 0;
+		SILNIK_P = 0;
 		
 		PORTC &= ~((1<<PC1)|(1<<PC2));
 		PORTC |= ((1<<PC0)|(1<<PC3));	//do przodu
-		signed int starySygnal = 0;
 		
-		zmien_czujniki('L');
-		_delay_ms(10);
-		
-		while(!(PIND & (1<<PD2)))
-		{
-			//START - pomiar na czujnikach (wartoœci 0-255)
-			//_delay_ms(10);
-			for(u08 i = 0; i<6; i++)
-			{
-				wartosci[5-i] = pomiar(i);
-			}
-			zmien_czujniki('P');
-			_delay_ms(10);
-			for(u08 i = 0; i<6; i++)
-			{
-				wartosci[i+6] = pomiar(i);
-			}
-			zmien_czujniki('L');
-			//KONIEC - pomiar na czujnikach
-			//START - stan czujników po progowaniu
-			for(u08 i = 0; i<12; i++)
-			{
-				if(wartosci[i]>granica) stany[i] = 1; else stany[i]=0;	//1 - linia czarna
-			}
-			//KONIEC - progowanie
-			//START - liczenie wartoœci steruj¹cej w zakresie (-6; 6)
-			signed int sygnal = 0, suma = 0;
-			for(u08 i = 0; i<12; i++)
-			{
-				sygnal += wagi[i]*stany[i];
-				suma += stany[i];
-			}
-			sygnal /= suma;
-			if((sygnal < 6) && (sygnal > -6))
-			{
-				/*if(starySygnal > 15)
-				{
-					sygnal = 70;
-				}					
-				else if(starySygnal < -15)
-				{
-					sygnal = -70;
-				}	*/
-				sygnal = starySygnal;				
-			}
-			//starySygnal = (sygnal+starySygnal)/2;
-			starySygnal = sygnal;
-			//KONIEC - wartoœæ steruj¹ca
-			//START - ustawianie PWM
-			
-			signed int silnik1 = 40 - sygnal*0.6;	//prawy
-			signed int silnik2 = 40 + sygnal*0.6;	//lewy
-			if(silnik1 < 0) silnik1 = 0;
-				else if(silnik1 > 150) silnik1 = 150;
-			if(silnik2 < 0) silnik2 = 0;
-				else if(silnik2 > 150) silnik2 = 150;
-			OCR1A = silnik1;
-			OCR1B = silnik2;
-			//KONIEC - ustawianie PWM
-			_delay_ms(10);
-			//licznik++;
-		}
-		OCR1A = 0;
-		OCR1B = 0;
-		for(;;)
+		tryb = TRYB_JAZDA;
+	}	
+	
+	if(tryb == TRYB_STOP)
+	{
+		for(;;)	//mrugaj wszystkimi diodami
 		{
 			PORTB ^= ((1<<PB2)|(1<<PB3)|(1<<PB4));
 			_delay_ms(500);
@@ -299,10 +204,9 @@ int main(void)
 	return 0;
 }
 
-ISR(INT0_vect)
+ISR(INT0_vect)	//obs³uga sygna³u STOP
 {
-	//obs³uga sygna³u STOP
-
+	tryb = TRYB_STOP;
 }
 
 ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
@@ -326,8 +230,40 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 		zmien_czujniki('L');
 	}
 	
-	if(strona == 'L')	//jeœli s¹ wczytane obie strony; dzia³ania na sygnale
+	if(strona == 'L' && tryb == TRYB_JAZDA)	//wczytane obie strony; dzia³ania na sygnale
 	{
+		for(u08 i = 0; i<12; i++)	//progowanie
+		{
+			if(wartosci[i]>granica) stany[i] = 1; else stany[i]=0;	//1 - linia czarna
+		}
 		
+		//sygnal - aktualne po³o¿enie linii
+		//suma - liczba czujników, które wykry³y liniê
+		signed int sygnal = 0, suma = 0;
+		for(u08 i = 0; i<12; i++)
+		{
+			sygnal += wagi[i]*stany[i];
+			suma += stany[i];
+		}
+		sygnal /= suma;
+		
+		//sygna³ bliski 0, czyli linia na œrodku albo *zgubiona*
+		if((sygnal < 6) && (sygnal > -6))
+		{
+			sygnal = starySygnal;
+		}
+		
+		starySygnal = sygnal;
+		
+		//wstawienie wartoœci na silniki
+		signed int naSilnikP = PWM_PROSTO - sygnal*0.6;	//prawy
+		signed int naSilnikL = PWM_PROSTO + sygnal*0.6;	//lewy
+		if(naSilnikP < 0) naSilnikP = 0;
+			else if(naSilnikP > PWM_MAX) naSilnikP = PWM_MAX;
+		if(naSilnikL < 0) naSilnikL = 0;
+			else if(naSilnikL > PWM_MAX) naSilnikL = PWM_MAX;
+			
+		SILNIK_P = naSilnikP;
+		SILNIK_L = naSilnikL;
 	}
 }
