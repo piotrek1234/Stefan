@@ -18,7 +18,7 @@
 
 volatile u08 wartosci[12];
 volatile u08 stany[12];
-volatile s08 wagi[12] = {-55, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 55};
+volatile signed int wagi[12] = {-155, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 155};
 
 void ustaw_porty()
 {
@@ -38,7 +38,7 @@ void ustaw_porty()
 void ustaw_adc()
 {
 	ADMUX |= ((1<<REFS0)|(1<<ADLAR)|7);	//VCC jako napiêcie odniesienia, wyrównanie wyniku do lewej, kana³ 7 (bateria)
-	ADCSRA |= ((1<<ADEN)|(1<<ADPS2)|(1<<ADPS0));	//w³¹czenie ADC, dzielnik czêstotliwoœci 32
+	ADCSRA |= ((1<<ADEN)|(1<<ADPS1));	//w³¹czenie ADC, dzielnik czêstotliwoœci 4
 }
 void ustaw_usart()
 {
@@ -259,16 +259,18 @@ int main(void)
 			sygnal /= suma;
 			if((sygnal < 6) && (sygnal > -6))
 			{
-				if(starySygnal > 20)
+				/*if(starySygnal > 15)
 				{
 					sygnal = 70;
 				}					
-				else if(starySygnal < -20)
+				else if(starySygnal < -15)
 				{
 					sygnal = -70;
-				}					
+				}	*/
+				sygnal = starySygnal;				
 			}
-			starySygnal = (sygnal+starySygnal)/2;
+			//starySygnal = (sygnal+starySygnal)/2;
+			starySygnal = sygnal;
 			//KONIEC - wartoœæ steruj¹ca
 			//START - ustawianie PWM
 			
@@ -281,7 +283,7 @@ int main(void)
 			OCR1A = silnik1;
 			OCR1B = silnik2;
 			//KONIEC - ustawianie PWM
-			_delay_ms(20);
+			_delay_ms(10);
 			//licznik++;
 		}
 		OCR1A = 0;
