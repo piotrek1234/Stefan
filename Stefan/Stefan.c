@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <avr/interrupt.h>
 
-volatile u08 wartosci[12];
+volatile u08 wartosci[12], strona = 'L';
 volatile u08 stany[12];
 volatile signed int wagi[12] = {-155, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 155};
 
@@ -86,6 +86,7 @@ void ustaw_timer()
 	TIMSK |= (1<<OCIE0);	//przerwanie przy doliczeniu
 	//czêstotliwoœæ 7372800/1024/72 = 100 Hz
 	//odlicza 10ms i wywo³uje przerwanie
+	//dla 5ms trzeba ustawiæ OCR0 = 36
 }
 
 void wyslij_usart(u08 znak)
@@ -293,49 +294,6 @@ int main(void)
 			PORTB ^= ((1<<PB2)|(1<<PB3)|(1<<PB4));
 			_delay_ms(500);
 		}
-		
-		/*for(;;)
-		{
-			if(!(PINC & (1<<PC6)))
-			{
-				OCR1A += 20;
-				OCR1B += 20;
-				if(OCR1A > 235)
-				{
-					OCR1A = 20;
-					OCR1B = 20;
-				}
-				_delay_ms(100);
-			}
-			if(!(PINC & (1<<PC5)))
-			{
-				OCR1A -= 20;
-				OCR1B -= 20;
-				if(OCR1A <20)
-				{
-					OCR1A = 220;
-					OCR1B = 220;
-				}
-				_delay_ms(100);
-			}
-			if(!(PINC & (1<<PC4)))
-			{
-				if(kier == 'P')
-				{
-					PORTC &= ~((1<<PC1)|(1<<PC2));
-					PORTC |= ((1<<PC0)|(1<<PC3));
-					kier = 'T';
-				}
-				else
-				{
-					PORTC |= ((1<<PC1)|(1<<PC2));
-					PORTC &= ~((1<<PC0)|(1<<PC3));
-					kier = 'P';
-				}
-				
-			}			
-			_delay_ms(100);
-		}*/
 	}
 	
 	return 0;
@@ -347,8 +305,29 @@ ISR(INT0_vect)
 
 }
 
-ISR(TIMER0_COMP_vect)
+ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 {
-	//dzia³anie co 10ms
-
+	for(u08 i=0; i<6; i++)	//pobranie stanu czujników (0-255)
+	{
+		if(strona == 'L')
+			wartosci[5-i] = pomiar(i);
+		else
+			wartosci[6+i] = pomiar(i);
+	}
+	
+	if(strona=='L')	//zmiana strony
+	{
+		strona = 'P';
+		zmien_czujniki('P');
+	}
+	else
+	{
+		strona = 'L';
+		zmien_czujniki('L');
+	}
+	
+	if(strona == 'L')	//jeœli s¹ wczytane obie strony; dzia³ania na sygnale
+	{
+		
+	}
 }
