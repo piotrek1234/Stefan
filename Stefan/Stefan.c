@@ -31,7 +31,7 @@
 
 volatile u08 wartosci[12], stany[12], strona = 'L', tryb = TRYB_NIC, granica, licznikKomp=0, wyslacInfo=0;
 volatile signed int starySygnal = 0;
-volatile signed int wagi[12] = {-155, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 155};
+volatile signed int wagi[12] = {-155, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 155}; // dalbym jako zminna lokalna w przerwaniu
 
 void ustaw_porty()
 {
@@ -68,7 +68,7 @@ void ustaw_przerwania()
 	GICR |= (1<<INT0);	//w��czenie przerwania
 }
 
-void zmien_czujniki(u08 naKtore)
+void zmien_czujniki(u08 naKtore) // tutaj dodalbym zmienna czujniki
 {
 	if(naKtore == 'L') naKtore = PB1; else naKtore = PB0;
 	PORTB &= ~((1<<PB0)|(1<<PB1));
@@ -113,7 +113,7 @@ void wyslij_usart(u08 znak) // usart'u nie ogarniam
 	UDR = znak;
 }
 
-u08 pomiar(u08 kanal)
+u08 pomiar(u08 kanal) 
 {
 	ADMUX &= ~((1<<MUX4)|(1<<MUX3)|(1<<MUX2)|(1<<MUX1)|(1<<MUX0)); // port ADC0 - PA0
 	ADMUX |= kanal; // wybrany kanal, odlegly o "kanal" od kanalu adc0
@@ -179,7 +179,7 @@ int main(void)
 				}
 				zmien_czujniki('P');
 				_delay_ms(10);
-				for(u08 i = 0; i<6; i++)
+				for(u08 i = 0; i<6; i++) // te instrukcje for wrzucilbym do oddzielnej funkcji
 				{
 					u08 wartosc;
 					wartosc = pomiar(i);
