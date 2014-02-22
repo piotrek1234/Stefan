@@ -31,7 +31,7 @@
 
 volatile u08 wartosci[12], stany[12], strona = 'L', tryb = TRYB_NIC, granica, licznikKomp=0, wyslacInfo=0;
 volatile signed int starySygnal = 0;
-volatile signed int wagi[12] = {-155, -37, -31, -23, -15, -6, 6, 15, 23, 31, 39, 155};
+volatile signed int wagi[12] = {-155, -55, -31, -23, -15, -6, 6, 15, 23, 31, 55, 155};
 
 void ustaw_porty()
 {
@@ -279,6 +279,24 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 			{
 				if(wartosci[i]>granica) stany[i] = 1; else stany[i]=0;	//1 - linia czarna
 			}
+			
+			/*******************************/
+			wyslij_usart('[');
+			for(u08 i=0; i<12; i++)	//dla ka¿dej wartoœci czujnika
+			{
+				int temp = wartosci[i];
+				char bufor[4];
+				itoa(temp, bufor, 10);
+				u08 j=0;
+				while(bufor[j] != 0)
+				{
+					wyslij_usart(bufor[j]);	//wyœlij j-ty znak i zwiêksz j
+					j++;
+				}
+				if(i<11) wyslij_usart(',');
+			}
+			wyslij_usart(']');
+			/********************************/
 		
 			//sygnal - aktualne po³o¿enie linii
 			//suma - liczba czujników, które wykry³y liniê
@@ -290,7 +308,7 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 			}
 			sygnal /= suma;
 		
-			//sygnal += kp;
+			//sygnal *= kp;
 		
 			//sygna³ bliski 0, czyli linia na œrodku albo *zgubiona*
 			if((sygnal < 6) && (sygnal > -6))
@@ -305,18 +323,21 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 			//wstawienie wartoœci na silniki
 			signed int naSilnikP = PWM_PROSTO - sygnal*0.6;	//prawy
 			signed int naSilnikL = PWM_PROSTO + sygnal*0.6;	//lewy
+			
+			//sprawdzenie prezkroczenia zakresu sterowania
 			if(naSilnikP < 0) naSilnikP = 0;
 				else if(naSilnikP > PWM_MAX) naSilnikP = PWM_MAX;
 			if(naSilnikL < 0) naSilnikL = 0;
 				else if(naSilnikL > PWM_MAX) naSilnikL = PWM_MAX;
-		
+			
+			//wstawienie obliczonych wartoœci na silniki
 			SILNIK_P = naSilnikP;
 			SILNIK_L = naSilnikL;
 		}
 		else if(tryb == TRYB_KOMP)
 		{
-			if(licznikKomp == 10)	//co 100ms
-			{
+			//if(licznikKomp == 10)	//co 100ms
+			//{
 				wyslij_usart('[');
 				for(u08 i=0; i<12; i++)	//dla ka¿dej wartoœci czujnika
 				{
@@ -333,11 +354,11 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 				}
 				wyslij_usart(']');
 				
-				licznikKomp = 0;
-			}
-			licznikKomp++;
+			//	licznikKomp = 0;
+			//}
+			//licznikKomp++;
 			
-			if(wyslacInfo)
+			if(wyslacInfo)	//wys³anie paczki informacji
 			{
 				wyslacInfo = 0;
 				
