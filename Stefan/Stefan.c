@@ -119,7 +119,7 @@ u08 pomiar(u08 kanal)
 	ADMUX |= kanal; // wybrany kanal, odlegly o "kanal" od kanalu adc0
 	ADCSRA |= (1<<ADSC); // start konwersji
 	while(ADCSRA & (1<<ADSC)); // oczekiwanie na koniec konwersji (bit ADSC = 0)
-	return ADCH;
+	return ADCH; // zwrocenie wyniku pomiaru
 }
 
 int main(void)
@@ -170,7 +170,7 @@ int main(void)
 					czujniki = 'P';
 				}
 				_delay_ms(10);
-				for(u08 i = 0; i<6; i++)
+				for(u08 i = 0; i<6; i++) // i nr kanalu, czyli aktualny czujnik, sprawdzenie najwiekszego i najmniejszego pomiaru (kalibracja)
 				{
 					u08 wartosc;
 					wartosc = pomiar(i);
