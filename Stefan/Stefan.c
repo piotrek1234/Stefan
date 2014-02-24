@@ -31,7 +31,7 @@
 
 volatile u08 wartosci[12], stany[12], strona = 'L', tryb = TRYB_NIC, granica, licznikKomp=0, wyslacInfo=0;
 volatile signed int starySygnal = 0;
-volatile signed int wagi[12] = {-155, -55, -31, -23, -15, -6, 6, 15, 23, 31, 55, 155};
+volatile signed int wagi[12] = {-155, -55, -31, -23, -15, -6, 6, 15, 23, 31, 55, 155}; // dalbym jako zminna lokalna w przerwaniu
 
 void ustaw_porty()
 {
