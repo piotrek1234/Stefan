@@ -22,6 +22,8 @@
 #define PWM_PROSTO 40
 //#define KP 1
 
+#define EEPROM_GRANICA 0x1
+
 #define TRYB_NIC 0
 #define TRYB_ODLICZANIE 1
 #define TRYB_JAZDA 2
@@ -31,7 +33,7 @@
 
 volatile u08 wartosci[12], stany[12], strona = 'L', tryb = TRYB_NIC, granica, licznikKomp=0, wyslacInfo=0;
 volatile signed int starySygnal = 0;
-volatile signed int wagi[12] = {-155, -55, -31, -23, -15, -6, 6, 15, 23, 31, 55, 155}; // dalbym jako zminna lokalna w przerwaniu
+signed int wagi[12] = {-155, -55, -31, -23, -15, -6, 6, 15, 23, 31, 55, 155};
 
 void ustaw_porty()
 {
@@ -122,6 +124,27 @@ u08 pomiar(u08 kanal)
 	return ADCH;
 }
 
+void zapisz_eeprom(unsigned int adres, u08 dane)
+{
+	while(EECR & (1<<EEWE));
+	
+	EEAR = adres;
+	EEDR = dane;
+	
+	EECR |= (1<<EEMWE);
+	EECR |= (1<<EEWE);
+}
+
+u08 wczytaj_eeprom(unsigned int adres)
+{
+	while(EECR & (1<<EEWE));
+	
+	EEAR = adres;
+	EECR |= (1<<EERE);
+	
+	return EEDR;
+}
+
 int main(void)
 {
 	volatile u08 min = 255, max = 0;
@@ -138,6 +161,8 @@ int main(void)
 	
 	sei();	//w³¹czenie przerwañ
 	
+	granica = wczytaj_eeprom(EEPROM_GRANICA);	//wczytanie granicy z pamiêci
+	
 	_delay_ms(100);
 	while(tryb == TRYB_NIC)	//obs³uga przycisków
 	{
@@ -147,6 +172,10 @@ int main(void)
 			tryb = TRYB_KOMP;
 			UCSRB |= (1<<RXCIE);	//w³¹cz przerwanie przy odbiorze z USART
 		}			
+		else if(PINB & (1<<PB5))	//start z pilota
+		{
+			tryb = TRYB_ODLICZANIE;
+		}
 	}
 	while(PINC & (1<<PC4));	//czekaj na lewy przycisk
 	if(tryb == TRYB_KOMP) ustaw_timer();
@@ -188,6 +217,8 @@ int main(void)
 				}
 			}
 			granica = (min+max)/2;
+			zapisz_eeprom(EEPROM_GRANICA, granica);
+			
 			tryb = TRYB_ODLICZANIE;
 		}
 		if(tryb == TRYB_ODLICZANIE)
