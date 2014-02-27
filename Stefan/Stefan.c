@@ -20,9 +20,11 @@
 
 #define PWM_MAX 150
 #define PWM_PROSTO 40
-//#define KP 1
+#define KP 1
+#define KI 20
 
 #define EEPROM_GRANICA 0x1
+#define EEPROM_WAGI 0x2
 
 #define TRYB_NIC 0
 #define TRYB_ODLICZANIE 1
@@ -32,7 +34,8 @@
 #define TRYB_KOMP 5
 
 volatile u08 wartosci[12], stany[12], strona = 'L', tryb = TRYB_NIC, granica, licznikKomp=0, wyslacInfo=0;
-volatile signed int starySygnal = 0;
+
+volatile signed int starySygnal = 0, ei = 0;
 signed int wagi[12] = {-155, -55, -31, -23, -15, -6, 6, 15, 23, 31, 55, 155};
 
 void ustaw_porty()
@@ -161,7 +164,11 @@ int main(void)
 	
 	sei();	//w³¹czenie przerwañ
 	
-	granica = wczytaj_eeprom(EEPROM_GRANICA);	//wczytanie granicy z pamiêci
+	//granica = wczytaj_eeprom(EEPROM_GRANICA);	//wczytanie granicy z pamiêci
+	/*for(u08 i = 0; i<12; i++)		//wczytanie wag z pamiêci
+	{
+		wagi[i] = wczytaj_eeprom(EEPROM_WAGI+i);
+	}*/
 	
 	_delay_ms(100);
 	while(tryb == TRYB_NIC)	//obs³uga przycisków
@@ -172,12 +179,9 @@ int main(void)
 			tryb = TRYB_KOMP;
 			UCSRB |= (1<<RXCIE);	//w³¹cz przerwanie przy odbiorze z USART
 		}			
-		else if(PINB & (1<<PB5))	//start z pilota
-		{
-			tryb = TRYB_ODLICZANIE;
-		}
 	}
-	while(PINC & (1<<PC4));	//czekaj na lewy przycisk
+	if((tryb==TRYB_KALIBRACJA)|(tryb==TRYB_KOMP))
+		while(PINC & (1<<PC4));	//czekaj na lewy przycisk
 	if(tryb == TRYB_KOMP) ustaw_timer();
 	
 	while(1)
@@ -217,7 +221,7 @@ int main(void)
 				}
 			}
 			granica = (min+max)/2;
-			zapisz_eeprom(EEPROM_GRANICA, granica);
+			//zapisz_eeprom(EEPROM_GRANICA, granica);
 			
 			tryb = TRYB_ODLICZANIE;
 		}
@@ -279,6 +283,13 @@ ISR(USART_RXC_vect)	//odbiór znaku z USART
 	temp = UDR;
 	
 	if(temp == '?') wyslacInfo = 1;
+	/*if(temp == '!')	//zapisanie wag do eepromu - tylko raz!!!
+	{
+		for(u08 i = 0; i<12; i++)
+		{
+			zapisz_eeprom(EEPROM_WAGI+i, wagi[i]);
+		}
+	}*/
 }
 
 ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
@@ -312,7 +323,7 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 			}
 			
 			/*******************************/
-			wyslij_usart('[');
+			/*wyslij_usart('[');
 			for(u08 i=0; i<12; i++)	//dla ka¿dej wartoœci czujnika
 			{
 				int temp = wartosci[i];
@@ -326,21 +337,19 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 				}
 				if(i<11) wyslij_usart(',');
 			}
-			wyslij_usart(']');
+			wyslij_usart(']');*/
 			/********************************/
 		
 			//sygnal - aktualne po³o¿enie linii
 			//suma - liczba czujników, które wykry³y liniê
-			signed int sygnal = 0, suma = 0;
+			signed int sygnal = 0, suma = 0, ep;
 			for(u08 i = 0; i<12; i++)
 			{
 				sygnal += wagi[i]*stany[i];
 				suma += stany[i];
 			}
 			sygnal /= suma;
-		
-			//sygnal *= kp;
-		
+					
 			//sygna³ bliski 0, czyli linia na œrodku albo *zgubiona*
 			if((sygnal < 6) && (sygnal > -6))
 			{
@@ -348,12 +357,15 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 				PORTB &= ~(1<<PB4);	
 			}
 			else PORTB |= (1<<PB4);	//prawa dioda œwieci przy sygnale bliskim 0
+			
+			ep = KP * sygnal;
+			//ei = ei + sygnal/KI;
 		
 			starySygnal = sygnal;
 		
 			//wstawienie wartoœci na silniki
-			signed int naSilnikP = PWM_PROSTO - sygnal*0.6;	//prawy
-			signed int naSilnikL = PWM_PROSTO + sygnal*0.6;	//lewy
+			signed int naSilnikP = PWM_PROSTO - (ep/*+ei*/)*0.6;	//prawy
+			signed int naSilnikL = PWM_PROSTO + (ep/*+ei*/)*0.6;	//lewy
 			
 			//sprawdzenie prezkroczenia zakresu sterowania
 			if(naSilnikP < 0) naSilnikP = 0;
