@@ -20,8 +20,10 @@
 
 #define PWM_MAX 150
 #define PWM_PROSTO 40
-#define KP 1
-#define KI 20
+#define KP 3
+#define KI 70
+#define KD 20
+#define EI_MAX 300
 
 #define EEPROM_GRANICA 0x1
 #define EEPROM_WAGI 0x2
@@ -36,7 +38,8 @@
 volatile u08 wartosci[12], stany[12], strona = 'L', tryb = TRYB_NIC, granica, licznikKomp=0, wyslacInfo=0;
 
 volatile signed int starySygnal = 0, ei = 0;
-signed int wagi[12] = {-155, -55, -31, -23, -15, -6, 6, 15, 23, 31, 55, 155};
+//signed int wagi[12] = {-155, -70, -45, -23, -15, -6, 6, 15, 23, 45, 70, 155};
+signed int wagi[12] = {-55, -39, -31, -23, -15, -6, 6, 15, 23, 31, 39, 55};
 
 void ustaw_porty()
 {
@@ -101,7 +104,7 @@ void ustaw_timer()
 {
 	TCCR0 |= (1<<WGM01);	//tryb CTC
 	TCCR0 |= ((1<<CS02)|(1<<CS00));	//preskaler 1024
-	OCR0 = 72;
+	OCR0 = 36;
 	TIMSK |= (1<<OCIE0);	//przerwanie przy doliczeniu
 	//czêstotliwoœæ 7372800/1024/72 = 100 Hz
 	//odlicza 10ms i wywo³uje przerwanie
@@ -220,7 +223,8 @@ int main(void)
 					else if(wartosc < min) min = wartosc;
 				}
 			}
-			granica = (min+max)/2;
+			//granica = (min+max)/2;
+			granica = 80;
 			//zapisz_eeprom(EEPROM_GRANICA, granica);
 			
 			tryb = TRYB_ODLICZANIE;
@@ -342,7 +346,7 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 		
 			//sygnal - aktualne po³o¿enie linii
 			//suma - liczba czujników, które wykry³y liniê
-			signed int sygnal = 0, suma = 0, ep;
+			signed int sygnal = 0, suma = 0, ep, ed;
 			for(u08 i = 0; i<12; i++)
 			{
 				sygnal += wagi[i]*stany[i];
@@ -359,19 +363,68 @@ ISR(TIMER0_COMP_vect)	//dzia³anie co 10ms
 			else PORTB |= (1<<PB4);	//prawa dioda œwieci przy sygnale bliskim 0
 			
 			ep = KP * sygnal;
-			//ei = ei + sygnal/KI;
+			ei = ei;// + sygnal/KI;
+			ed = KD*(sygnal-starySygnal);
+			
+			if(ei > EI_MAX) ei = EI_MAX;
+			else if(ei < (-EI_MAX)) ei = (-EI_MAX);
+			
+			int e = ep+ed+ei;
 		
 			starySygnal = sygnal;
 		
 			//wstawienie wartoœci na silniki
-			signed int naSilnikP = PWM_PROSTO - (ep/*+ei*/)*0.6;	//prawy
-			signed int naSilnikL = PWM_PROSTO + (ep/*+ei*/)*0.6;	//lewy
+			signed int naSilnikP = PWM_PROSTO - (e);	//prawy
+			signed int naSilnikL = PWM_PROSTO + (e);	//lewy
 			
 			//sprawdzenie prezkroczenia zakresu sterowania
-			if(naSilnikP < 0) naSilnikP = 0;
+			/*if(naSilnikP < 0) naSilnikP = 0;
 				else if(naSilnikP > PWM_MAX) naSilnikP = PWM_MAX;
 			if(naSilnikL < 0) naSilnikL = 0;
-				else if(naSilnikL > PWM_MAX) naSilnikL = PWM_MAX;
+				else if(naSilnikL > PWM_MAX) naSilnikL = PWM_MAX;*/
+			PORTC &= ~((1<<PC1)|(1<<PC2));
+			PORTC |= ((1<<PC0)|(1<<PC3));
+			if(naSilnikL < 0)
+			{
+				//if(naSilnikL < -10)
+				{
+					PORTC &= ~(1<<PC0);
+					PORTC |= (1<<PC1);
+					//naSilnikL += 20;
+				}
+				//else naSilnikL = 0;
+				//naSilnikL = PWM_MAX;
+			}
+			else if(naSilnikL > 0)
+			{
+				PORTC &= ~(1<<PC1);
+				PORTC |= (1<<PC0);
+				//naSilnikP = PWM_MAX;
+			}
+							 
+			if(naSilnikP < 0)
+			{
+				//if(naSilnikP < -10)
+				{
+					PORTC &= ~(1<<PC3);
+					PORTC |= (1<<PC2);
+					//naSilnikP += 20;
+				}
+				//else naSilnikP = 0;
+				
+				//naSilnikP = PWM_MAX;
+			}
+			else if(naSilnikP > 0)
+			{
+				PORTC &= ~(1<<PC2);
+				PORTC |= (1<<PC3);
+				//naSilnikP = PWM_MAX;
+			}
+			if(naSilnikL<0) naSilnikL *= -1;
+			if(naSilnikP<0) naSilnikP *= -1;
+			
+			if(naSilnikL > PWM_MAX) naSilnikL = PWM_MAX;
+			if(naSilnikP > PWM_MAX) naSilnikP = PWM_MAX;
 			
 			//wstawienie obliczonych wartoœci na silniki
 			SILNIK_P = naSilnikP;
